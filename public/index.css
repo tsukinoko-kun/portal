@@ -1,0 +1,316 @@
+:root {
+    color-scheme: dark;
+    background-color: black;
+    color: whitesmoke;
+
+    --magic: 155, 25, 255;
+}
+
+:root, body, main {
+    overflow: hidden !important;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    border: none;
+    outline: none;
+    user-select: none;
+}
+
+body {
+    background-image: url("/backdrop.webp");
+    background-size: 33vmax;
+    background-attachment: fixed;
+    background-position: center;
+    background-repeat: repeat;
+    font-family: sans-serif;
+}
+
+main {
+    width: 100dvw;
+    height: 100dvh;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+#fileInput {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 100lvw;
+    height: 100lvh;
+    cursor: pointer;
+    opacity: 0;
+}
+
+main::before {
+    content: "Drop files here";
+    position: fixed;
+    display: block;
+    font-family: "Garamond", "Bookman Old Style", "Georgia", "Times New Roman", serif;
+    top: 5lvh;
+    left: 0;
+    width: 100dvw;
+    font-size: 2rem;
+    font-weight: bold;
+    text-align: center;
+}
+
+.sending main::before {
+    content: "Sending...";
+}
+
+.ring, .particle, main::before {
+    pointer-events: none;
+}
+
+.ring::before,
+.ring::after,
+.ring {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 50vmin;
+    height: 50vmin;
+    border: 5vmin solid rgba(var(--magic), 1);
+    border-radius: 50%;
+}
+
+.ring {
+    filter: drop-shadow(0 0 5vmin rgb(var(--magic))) drop-shadow(0 0 1vmin rgb(var(--magic)));
+    background: radial-gradient(transparent, rgba(var(--magic), 0.5));
+}
+
+.drag-over .ring {
+    filter: drop-shadow(0 0 5vmin rgb(var(--magic))) drop-shadow(0 0 5vmin rgb(var(--magic)));
+}
+
+.sending .ring {
+    filter: drop-shadow(0 0 5vmin rgb(var(--magic))) drop-shadow(0 0 7.5vmin rgb(var(--magic)));
+}
+
+@keyframes wiggle-ring-a {
+    from {
+        transform: translate(-49%, -50%);
+    }
+    to {
+        transform: translate(-51%, -50%);
+    }
+}
+
+@keyframes wiggle-ring-b {
+    from {
+        transform: translate(-50%, -49%);
+    }
+    to {
+        transform: translate(-50%, -51%);
+    }
+}
+
+.ring::after,
+.ring::before {
+    content: "";
+    display: block;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+    animation-timing-function: ease-in-out;
+}
+
+.drag-over .ring::before,
+.sending .ring::before {
+    animation-name: wiggle-ring-a;
+    animation-duration: 200ms;
+}
+
+.drag-over .ring::after,
+.sending .ring::after {
+    animation-name: wiggle-ring-b;
+    animation-duration: 333ms;
+}
+
+.drag-over .ring {
+    background: radial-gradient(rgba(var(--magic), 0.1), rgba(var(--magic), 1));
+}
+
+.sending .ring {
+    background: radial-gradient(closest-side, pink, rgba(var(--magic), 1));
+}
+
+.particle {
+    opacity: 0;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 2vmin;
+    height: 2vmin;
+    border-radius: 50%;
+    background-color: rgba(var(--magic), 1);
+    animation-iteration-count: infinite;
+    animation-timing-function: ease-in;
+    filter: drop-shadow(0 0 2vmin rgba(var(--magic), 1));
+}
+
+@keyframes particle-a {
+    0% {
+        transform: translate(0, 0) scale(0);
+        opacity: 0;
+    }
+    90% {
+        opacity: 1;
+    }
+    100% {
+        transform: translate(50vmin, 10vmin) scale(1);
+        opacity: 0;
+    }
+}
+
+@keyframes particle-b {
+    0% {
+        transform: translate(0, 0) scale(0);
+        opacity: 0;
+    }
+    90% {
+        opacity: 1;
+    }
+    100% {
+        transform: translate(-50vmin, -13vmin) scale(1);
+        opacity: 0;
+    }
+}
+
+@keyframes particle-c {
+    0% {
+        transform: translate(0, 0) scale(0);
+        opacity: 0;
+    }
+    90% {
+        opacity: 1;
+    }
+    100% {
+        transform: translate(-10vmin, 50vmin) scale(1);
+        opacity: 0;
+    }
+}
+
+@keyframes particle-d {
+    0% {
+        transform: translate(0, 0) scale(0);
+        opacity: 0;
+    }
+    90% {
+        opacity: 1;
+    }
+    100% {
+        transform: translate(13vmin, -50vmin) scale(1);
+        opacity: 0;
+    }
+}
+
+@keyframes particle-e {
+    0% {
+        transform: translate(0, 0) scale(0);
+        opacity: 0;
+    }
+    90% {
+        opacity: 1;
+    }
+    100% {
+        transform: translate(-2vmin, -40vmin) scale(1);
+        opacity: 0;
+    }
+}
+
+@keyframes particle-f {
+    0% {
+        transform: translate(0, 0) scale(0);
+        opacity: 0;
+    }
+    90% {
+        opacity: 1;
+    }
+    100% {
+        transform: translate(40vmin, 2vmin) scale(1);
+        opacity: 0;
+    }
+}
+
+@keyframes particle-g {
+    0% {
+        transform: translate(0, 0) scale(0);
+        opacity: 0;
+    }
+    90% {
+        opacity: 1;
+    }
+    100% {
+        transform: translate(-40vmin, -2vmin) scale(1);
+        opacity: 0;
+    }
+}
+
+@keyframes particle-h {
+    0% {
+        transform: translate(0, 0) scale(0);
+        opacity: 0;
+    }
+    90% {
+        opacity: 1;
+    }
+    100% {
+        transform: translate(2vmin, 40vmin) scale(1);
+        opacity: 0;
+    }
+}
+
+.particle-a {
+    animation-name: particle-a;
+    animation-delay: 0s;
+}
+
+.particle-b {
+    animation-name: particle-b;
+    animation-delay: 0.2s;
+}
+
+.particle-c {
+    animation-name: particle-c;
+    animation-delay: 0.5s;
+}
+
+.particle-d {
+    animation-name: particle-d;
+    animation-delay: 0.75s;
+}
+
+.particle-e {
+    animation-name: particle-e;
+    animation-delay: 1s;
+}
+
+.particle-f {
+    animation-name: particle-f;
+    animation-delay: 1.25s;
+}
+
+.particle-g {
+    animation-name: particle-g;
+    animation-delay: 1.5s;
+}
+
+.particle-h {
+    animation-name: particle-h;
+    animation-delay: 1.75s;
+}
+
+.particle {
+    animation-duration: 3s;
+}
+
+
+.sending .particle {
+    animation-direction: reverse;
+    animation-duration: 1s;
+}
