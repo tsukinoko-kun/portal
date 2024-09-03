@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+---
+builds:
+  - binary: portal
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+release:
+  prerelease: auto
+
+universal_binaries:
+  - replace: false
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+brews:
+  - name: portal
+    homepage: https://github.com/tsukinoko-kun/portal
+    description: Simple local file sharing
+    repository:
+      owner: tsukinoko-kun
+      name: homebrew-tap
+    commit_author:
+      name: tsukinoko-kun
+      email: gh@frankmayer.dev
