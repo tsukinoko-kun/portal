@@ -9,14 +9,26 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"time"
 )
 
 const (
 	chunkSize = 1024 * 1024 // 1MB
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize: chunkSize,
+var (
+	upgrader = websocket.Upgrader{
+		ReadBufferSize: chunkSize,
+	}
+	wd string
+)
+
+func init() {
+	var err error
+	if wd, err = os.Getwd(); err != nil {
+		log.Fatal("failed to get working directory", "err", err)
+	}
 }
 
 type (
@@ -25,6 +37,8 @@ type (
 		Name string `json:"name"`
 		// Size is the size of the file in bytes.
 		Size int `json:"size"`
+		// LastModified is the last modified time of the file.
+		LastModified int64 `json:"lastModified"`
 	}
 )
 
@@ -45,12 +59,27 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Info("received header", "header", header)
 
-	file, err := os.Create(header.Name)
+	p := filepath.Join(wd, header.Name)
+
+	// check if file is inside wd
+	if relPath, err := filepath.Rel(wd, p); err != nil || relPath == ".." || relPath[:2] == ".." {
+		log.Error("file is outside working directory", "path", p)
+		return
+	}
+
+	// create parent directories
+	if err := os.MkdirAll(filepath.Dir(p), 0777); err != nil {
+		log.Error("failed to create parent directories", "err", err)
+		return
+	}
+
+	// create file
+	f, err := os.Create(p)
 	if err != nil {
 		log.Error("failed to create file", "err", err)
 		return
 	}
-	defer file.Close()
+	defer f.Close()
 
 	// Send READY signal to start receiving file chunks
 	err = conn.WriteMessage(websocket.TextMessage, []byte("READY"))
@@ -76,7 +105,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if messageType == websocket.BinaryMessage {
-			_, err = file.Write(p)
+			_, err = f.Write(p)
 			if err != nil {
 				log.Error("failed to write to file", "err", err)
 				return
@@ -88,6 +117,12 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 			log.Error("failed to write message", "err", err)
 			return
 		}
+	}
+
+	// set last modified time
+	lastModified := time.UnixMilli(header.LastModified)
+	if err := os.Chtimes(p, lastModified, lastModified); err != nil {
+		log.Error("failed to set last modified time", "err", err)
 	}
 
 	// send EOF to client to signal that the file has been received
@@ -119,28 +154,26 @@ func getPublicIP() (string, error) {
 
 func main() {
 	port := flag.Int("port", 0, "port to listen on")
+	path := flag.String("path", ".", "path to save files")
 	flag.Parse()
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/backdrop.webp":
-			w.Header().Set("Content-Type", "image/webp")
-			_, _ = w.Write(public.BackdropWebP)
-		case "/favicon.svg":
-			w.Header().Set("Content-Type", "image/svg+xml")
-			_, _ = w.Write(public.FaviconSVG)
-		case "/index.css":
-			w.Header().Set("Content-Type", "text/css")
-			_, _ = w.Write(public.IndexCSS)
-		case "/":
-			w.Header().Set("Content-Type", "text/html")
-			_, _ = w.Write(public.IndexHTML)
-		case "/index.js":
-			w.Header().Set("Content-Type", "application/javascript")
-			_, _ = w.Write(public.IndexJS)
-		default:
-			http.NotFound(w, r)
+	if *path != "." {
+		if err := os.MkdirAll(*path, 0777); err != nil {
+			log.Fatal("failed to create directory", "path", path, "err", err)
+			return
 		}
+		if err := os.Chdir(*path); err != nil {
+			log.Fatal("failed to change directory", "err", err)
+			return
+		}
+		var err error
+		if wd, err = os.Getwd(); err == nil {
+			log.Info("working directory", "path", wd)
+		}
+	}
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.FileServerFS(public.Fs).ServeHTTP(w, r)
 	})
 	http.HandleFunc("/ws", wsHandler)
 

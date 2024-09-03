@@ -46,13 +46,14 @@ main {
 
 main::before {
     content: "Drop files here";
+    filter: drop-shadow(0 0 1rem black);
     position: fixed;
     display: block;
-    font-family: "Garamond", "Bookman Old Style", "Georgia", "Times New Roman", serif;
+    font-family: "Fondamento", "Garamond", "Bookman Old Style", "Georgia", "Times New Roman", cursive;
     top: 5lvh;
     left: 0;
     width: 100dvw;
-    font-size: 2rem;
+    font-size: 3rem;
     font-weight: bold;
     text-align: center;
 }
@@ -61,7 +62,7 @@ main::before {
     content: "Sending...";
 }
 
-.ring, .particle, main::before {
+.ring, .particle, .file, main::before {
     pointer-events: none;
 }
 
@@ -135,7 +136,7 @@ main::before {
 }
 
 .sending .ring {
-    background: radial-gradient(closest-side, pink, rgba(var(--magic), 1));
+    background: radial-gradient(closest-side, rgba(255, 200, 230, 0.25), rgba(var(--magic), 1));
 }
 
 .particle {
@@ -162,7 +163,7 @@ main::before {
         opacity: 1;
     }
     100% {
-        transform: translate(50vmin, 10vmin) scale(1);
+        transform: translate(50vmax, 10vmax) scale(1);
         opacity: 0;
     }
 }
@@ -176,7 +177,7 @@ main::before {
         opacity: 1;
     }
     100% {
-        transform: translate(-50vmin, -13vmin) scale(1);
+        transform: translate(-50vmax, -13vmax) scale(1);
         opacity: 0;
     }
 }
@@ -190,7 +191,7 @@ main::before {
         opacity: 1;
     }
     100% {
-        transform: translate(-10vmin, 50vmin) scale(1);
+        transform: translate(-10vmax, 50vmax) scale(1);
         opacity: 0;
     }
 }
@@ -204,7 +205,7 @@ main::before {
         opacity: 1;
     }
     100% {
-        transform: translate(13vmin, -50vmin) scale(1);
+        transform: translate(13vmax, -50vmax) scale(1);
         opacity: 0;
     }
 }
@@ -218,7 +219,7 @@ main::before {
         opacity: 1;
     }
     100% {
-        transform: translate(-2vmin, -40vmin) scale(1);
+        transform: translate(-10vmax, -25vmax) scale(1);
         opacity: 0;
     }
 }
@@ -232,7 +233,7 @@ main::before {
         opacity: 1;
     }
     100% {
-        transform: translate(40vmin, 2vmin) scale(1);
+        transform: translate(25vmax, 10vmax) scale(1);
         opacity: 0;
     }
 }
@@ -246,7 +247,7 @@ main::before {
         opacity: 1;
     }
     100% {
-        transform: translate(-40vmin, -2vmin) scale(1);
+        transform: translate(-25vmax, -10vmax) scale(1);
         opacity: 0;
     }
 }
@@ -260,7 +261,7 @@ main::before {
         opacity: 1;
     }
     100% {
-        transform: translate(2vmin, 40vmin) scale(1);
+        transform: translate(10vmax, 25vmax) scale(1);
         opacity: 0;
     }
 }
@@ -306,11 +307,38 @@ main::before {
 }
 
 .particle {
+    animation-direction: normal;
     animation-duration: 3s;
 }
 
+.drag-over .particle {
+    animation-direction: reverse;
+    animation-duration: 2s;
+}
 
 .sending .particle {
     animation-direction: reverse;
     animation-duration: 1s;
+}
+
+#file-icons {
+    z-index: 1000;
+    position: fixed;
+    top: 0;
+    left: 0;
+    padding: min(10vmin, 128px);
+    width: 100lvw;
+    height: 100lvh;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 1vmin;
+    pointer-events: none;
+}
+
+#file-icons .file {
+    display: block;
+    width: 5vmin;
+    aspect-ratio: auto;
 }

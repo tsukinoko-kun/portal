@@ -2,7 +2,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-args_bin = ["--port", "4321"]
+args_bin = ["--port", "4321", "--path", "~/Downloads/portal"]
 bin = "./tmp/main"
 cmd = "go build -o ./tmp/main ."
 delay = 1000
@@ -13,7 +13,7 @@ exclude_unchanged = false
 follow_symlink = false
 full_bin = ""
 include_dir = [".", "public"]
-include_ext = ["go", "html", "css", "js"]
+include_ext = ["go", "html", "css", "js", "webp", "svg"]
 include_file = ["main.go"]
 kill_delay = "1s"
 log = "build-errors.log"
