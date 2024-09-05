@@ -62,7 +62,7 @@ main::before {
     content: "Sending...";
 }
 
-.ring, .particle, .file, main::before {
+.ring, .particle, #fileIcons, .file, #bandwidthIndicator, main::before {
     pointer-events: none;
 }
 
@@ -346,4 +346,12 @@ main::before {
 
 #fileIcons .file span {
     font-size: 0.5rem;
+}
+
+#bandwidthIndicator {
+    color: antiquewhite;
+    position: fixed;
+    bottom: 1dvmin;
+    right: 1dvmin;
+    text-align: right;
 }

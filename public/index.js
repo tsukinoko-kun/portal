@@ -10,12 +10,31 @@ if (!fileInput) {
     throw new Error("fileInput element not found");
 }
 
+const bandwidthIndicator = document.getElementById("bandwidthIndicator")
+
 // types
 
 /**
  * @typedef {{name: string, size: number, lastModified: number, mime: string}} Header
  */
 
+/** manages bandwidth indicator */
+const bandwidthCalculator = {
+    i: 0,
+    measurements: new Array(16).fill(0),
+    addMeasurement(time, data) {
+        this.measurements[this.i] = data / time;
+        this.i++;
+        if (this.i >= this.measurements.length) {
+            this.i = 0;
+            this.measurements.sort((a, b) => b - a);
+            const median = this.measurements[8];
+            bandwidthIndicator.innerText = formatBytePerMillisecond(median);
+        }
+    }
+};
+
+/** handles errors sent from the Go server */
 class ServerError extends Error {
     constructor(message) {
         super("unexpected message from server");
@@ -31,6 +50,7 @@ class ServerError extends Error {
     }
 }
 
+/** implements the portal protocol */
 class Transmitter {
     constructor() {
         const url = new URL(window.location.href);
@@ -42,6 +62,7 @@ class Transmitter {
         const expProm = explodedPromise();
         this.available = expProm.promise;
         this.ws.addEventListener("open", expProm.resolve, {once: true})
+        this.sentCount = 0;
     }
 
     /**
@@ -63,7 +84,8 @@ class Transmitter {
 
     async streamReaderToWs(reader, header) {
         let totalBytesSent = 0;
-        let i = 0;
+        let lastTime = performance.now();
+        let lastData = 0;
         while (true) {
             const {value, done} = await reader.read();
             if (done) {
@@ -72,9 +94,19 @@ class Transmitter {
 
             totalBytesSent += value.byteLength;
             this.ws.send(value);
+
             updateFileVis(header, totalBytesSent / header.size);
-            if (i % 4 === 0) {
+
+            if (this.sentCount >= 64) {
+                this.sentCount = 0;
+                const nowTime = performance.now();
+                bandwidthCalculator.addMeasurement(nowTime - lastTime, totalBytesSent - lastData);
+                lastTime = nowTime;
+                lastData = totalBytesSent;
+
                 await delay(0);
+            } else {
+                this.sentCount++;
             }
         }
     }
@@ -123,8 +155,10 @@ class Transmitter {
         await serverReady;
 
         await this.streamReaderToWs(reader, header);
+        console.debug("EOF", header.name)
         await this.ws.send("EOF");
         removeFileVis(header);
+        this.setBusy(false);
     }
 
     end() {
@@ -390,4 +424,10 @@ function explodedPromise() {
         resolve,
         reject,
     }
+}
+
+const factor = 1000 / (1024 * 1024);
+
+function formatBytePerMillisecond(bytePerMilli) {
+    return (bytePerMilli * factor).toFixed(1) + " MB/s";
 }
