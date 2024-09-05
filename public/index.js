@@ -1,148 +1,164 @@
-const fileIcons = document.getElementById("file-icons");
-let filesToSend = 0;
-
-let intervalsWithoutSending = 0;
-window.setInterval(() => {
-    if (filesToSend === 0) {
-        if (intervalsWithoutSending++ > 2) {
-            document.body.classList.remove("sending");
-        }
-    } else {
-        document.body.classList.add("sending");
-    }
-}, 500)
-
+// ui elements
+const fileIcons = document.getElementById("fileIcons");
 if (!fileIcons) {
-    throw new Error("file-icons not found");
+    throw new Error("fileIcons element not found");
 }
 
-let wsCount = 0;
-const maxWsCount = 4;
-
-/** @returns {Promise<WebSocket>} */
-async function getWs() {
-    if (wsCount > maxWsCount) {
-        await new Promise((resolve) => {
-            const interval = window.setInterval(() => {
-                if (wsCount === 0) {
-                    window.clearInterval(interval);
-                    resolve();
-                }
-            }, 100);
-        });
-    }
-
-    return await new Promise((resolve, reject) => {
-        const url = new URL(window.location.href);
-        url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
-        url.pathname = "/ws";
-        const ws = new WebSocket(url.href);
-        ws.binaryType = "arraybuffer";
-
-        ws.addEventListener("open", function () {
-            resolve(ws);
-        });
-
-        ws.addEventListener("error", function (error) {
-            console.error("WS Error:", error);
-            reject(error);
-        });
-
-        ws.addEventListener("close", function () {
-            wsCount--;
-        });
-    });
-}
+/**
+ * @typedef {{name: string, size: number, lastModified: number, mime: string}} Header
+ */
 
 /** @type {HTMLInputElement} */
 const fileInput = document.getElementById("fileInput");
+if (!fileInput) {
+    throw new Error("fileInput element not found");
+}
+
+class ServerError extends Error {
+    constructor(message) {
+        super("unexpected message from server");
+        this._serverMessage = message;
+    }
+
+    toString() {
+        return this._serverMessage;
+    }
+
+    valueOf() {
+        return this._serverMessage;
+    }
+}
+
+function explodedPromise() {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+    return {
+        promise,
+        resolve,
+        reject,
+    }
+}
+
+class Transmitter {
+    constructor() {
+        const url = new URL(window.location.href);
+        url.pathname = "/ws";
+        url.hash = "";
+        url.search = "";
+        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+        this.ws = new WebSocket(url);
+        const expProm = explodedPromise();
+        this.available = expProm.promise;
+        this.ws.addEventListener("open", expProm.resolve, {once: true})
+    }
+
+    /**
+     * @param busy {boolean}
+     */
+    setBusy(busy) {
+        if (busy) {
+            const av = explodedPromise();
+            this.available = av.promise;
+            this.setFree = av.resolve;
+        } else {
+            if (this.setFree) {
+                this.setFree();
+            } else {
+                this.available = Promise.resolve();
+            }
+        }
+    }
+
+    async streamReaderToWs(reader, header) {
+        let totalBytesSent = 0;
+        while (true) {
+            const {value, done} = await reader.read();
+            if (done) {
+                break;
+            }
+
+            totalBytesSent += value.byteLength;
+            this.ws.send(value);
+            updateFileVis(header, totalBytesSent / header.size);
+            await delay(1);
+        }
+    }
+
+    /**
+     * @param matcher {(data: any)=>boolean}
+     * @returns {Promise<unknown>}
+     */
+    serverMessage(matcher) {
+        return new Promise((resolve, reject) => {
+            this.ws.addEventListener("message", (ev) => {
+                if (matcher(ev.data)) {
+                    resolve(ev.data);
+                } else {
+                    reject(new ServerError(ev.data));
+                }
+            }, {once: true});
+        });
+    }
+
+    /**
+     * @param file {File}
+     * @param name {string}
+     */
+    async transmit(file, name = file.webkitRelativePath || file.name) {
+        await this.available;
+        this.setBusy(true);
+
+        /** @type {Header} */
+        const header = {
+            name,
+            size: file.size,
+            lastModified: file.lastModified,
+            mime: file.type,
+        };
+
+        console.debug("transmit", file, header);
+        createFileVis(header);
+        const compressionStream = new CompressionStream("gzip");
+        const fileStream = file.stream();
+        const compressedStream = fileStream.pipeThrough(compressionStream);
+        const reader = compressedStream.getReader();
+
+        const serverReady = this.serverMessage((data) => data === "READY");
+        this.ws.send(JSON.stringify(header));
+        await serverReady;
+
+        await this.streamReaderToWs(reader, header);
+        await this.ws.send("EOF");
+        removeFileVis(header);
+    }
+
+    end() {
+        console.debug("sending EOT");
+        this.ws.send("EOT");
+    }
+}
+
+// input element
+
 fileInput.addEventListener("change", async function () {
     if (fileInput.files.length === 0) {
         return;
     }
 
+    const t = new Transmitter();
     document.body.classList.add("sending");
     for (const file of fileInput.files) {
-        await sendFile(file);
+        await t.transmit(file);
     }
-    cleanupFileVis();
+    t.end();
+    document.body.classList.remove("sending");
     fileInput.value = "";
 });
 
-/**
- * @param {File} file
- * @param {string} overwritePath
- * @returns {Promise<void>}
- */
-const sendFile = (file, overwritePath = file.webkitRelativePath ?? file.name) => new Promise(async (resolve, reject) => {
-    console.debug("sendFile", {file, overwritePath});
-    filesToSend++;
-    const ws = await getWs();
-    const compressionStream = new CompressionStream("gzip");
-    const fileStream = file.stream();
-    const compressedStream = fileStream.pipeThrough(compressionStream);
-    const reader = compressedStream.getReader();
-
-    ws.onmessage = function (event) {
-        switch (event.data) {
-            case "READY":
-                resolve();
-                void streamReaderToWs(file, reader, ws).finally(() => {
-                    removeFileVis(file);
-                    ws.send("EOF");
-                });
-                break;
-            case "EOF":
-                removeFileVis(file);
-                ws.close();
-                break;
-            default:
-                console.error("unexpected message from server:", event.data);
-                reject(event.data);
-                removeFileVis(file);
-                break;
-        }
-    };
-
-    const header = composeHeader(file, overwritePath);
-    ws.send(header);
-    createFileVis(file)
-});
-
-/**
- * @param file {File}
- * @param reader {ReadableStreamDefaultReader<any>}
- * @param ws {WebSocket}
- */
-async function streamReaderToWs(file, reader, ws) {
-    let totalBytesSent = 0;
-    while (true) {
-        const {value, done} = await reader.read();
-        if (done) {
-            break;
-        }
-
-        totalBytesSent += value.byteLength;
-        updateFileVis(file, totalBytesSent / file.size);
-
-        // Send the chunk over WebSocket
-        ws.send(value);
-    }
-}
-
-/**
- * @param file {File}
- * @param name {string}
- * @returns {string}
- */
-function composeHeader(file, name) {
-    const header = {
-        name: name || file.webkitRelativePath || file.name,
-        size: file.size,
-        lastModified: file.lastModified,
-    };
-    return JSON.stringify(header);
-}
+// drag and drop
 
 document.body.addEventListener("dragenter", handleDragEnter, {passive: true});
 document.body.addEventListener("dragover", handleDragOver);
@@ -175,18 +191,28 @@ async function handleDrop(ev) {
         entry: item.webkitGetAsEntry(),
     }));
 
+    if (items.length === 0) {
+        return;
+    }
+
+    document.body.classList.add("sending");
+
+    const t = new Transmitter();
+
     for (const i of items) {
         if (i.entry) {
             if (i.entry.isFile) {
                 try {
                     const file = await getFileFromEntry(i.entry);
-                    await sendFile(file);
+                    await t.transmit(file);
                 } catch (err) {
                     console.error("Failed to process file entry:", i.entry, err);
                 }
             } else if (i.entry.isDirectory) {
                 try {
-                    await readDirectoryRecursively(i.entry);
+                    for await (const file of readDirectoryRecursively(i.entry)) {
+                        await t.transmit(file.file, file.name);
+                    }
                 } catch (err) {
                     console.error("Failed to process directory entry:", i.entry, err);
                 }
@@ -198,7 +224,9 @@ async function handleDrop(ev) {
         }
     }
 
-    cleanupFileVis();
+    t.end();
+
+    document.body.classList.remove("sending");
 }
 
 /** Helper function to get file from entry */
@@ -209,7 +237,7 @@ async function getFileFromEntry(entry) {
 }
 
 /** Recursively read a directory entry */
-async function readDirectoryRecursively(directoryEntry) {
+async function* readDirectoryRecursively(directoryEntry) {
     const reader = directoryEntry.createReader();
     const entries = await readAllEntries(reader);
 
@@ -217,12 +245,14 @@ async function readDirectoryRecursively(directoryEntry) {
         if (entry.isFile) {
             try {
                 const file = await getFileFromEntry(entry);
-                await sendFile(file, entry.fullPath);
+                yield {file, name: entry.fullPath};
             } catch (err) {
                 console.error("Failed to process file within directory:", entry, err);
             }
         } else if (entry.isDirectory) {
-            await readDirectoryRecursively(entry);
+            for await (const f of readDirectoryRecursively(entry)) {
+                yield f;
+            }
         }
     }
 }
@@ -247,21 +277,25 @@ function readAllEntries(reader) {
     });
 }
 
-/** @param {File} file */
-function createFileVis(file) {
-    const fileEl = document.createElement("img")
-    fileEl.classList.add("file")
-    fileEl.src = getIcon(file)
-    fileEl.id = file.webkitRelativePath || file.name
-    fileIcons.appendChild(fileEl)
-    return fileEl
+/** @param {Header} header */
+function createFileVis(header) {
+    const fileEl = document.createElement("img");
+    fileEl.classList.add("file");
+    fileEl.src = getIcon(header);
+    fileEl.id = btoa(header.name);
+    fileIcons.appendChild(fileEl);
+    return fileEl;
 }
 
 const fontExtensions = new Set(["ttf", "otf", "woff", "woff2"]);
 const codeExtensions = new Set(["go", "rs", "ts", "js", "tsx", "jsx", "astro", "json", "json5", "jsonc", "yaml", "yml", "toml", "java", "kt", "gradle", "swift", "c", "cc", "cpp", "h", "hpp", "cs", "fs", "vb", "py", "rb", "r", "pl", "php", "php5", "lua", "sh", "ps1", "editorconfig", "gitignore", "md", "tex", "bib"]);
 
-function getIcon(file) {
-    const ext = file.name.split(".").pop()
+/**
+ * @param header {Header}
+ * @returns {string}
+ */
+function getIcon(header) {
+    const ext = header.name.split(".").pop()
     if (fontExtensions.has(ext)) {
         return "/file-earmark-font.svg"
     }
@@ -272,20 +306,19 @@ function getIcon(file) {
         return "/file-earmark-pdf.svg"
     }
 
-    const mime = file.type
-    if (mime.startsWith("image")) {
+    if (header.mime.startsWith("image")) {
         return "/file-earmark-image.svg"
     }
-    if (mime.startsWith("audio")) {
+    if (header.mime.startsWith("audio")) {
         return "/file-earmark-music.svg"
     }
-    if (mime.startsWith("video")) {
+    if (header.mime.startsWith("video")) {
         return "/file-earmark-play.svg"
     }
-    if (mime.startsWith("text")) {
+    if (header.mime.startsWith("text")) {
         return "/file-earmark-text.svg"
     }
-    if (mime.startsWith("application")) {
+    if (header.mime.startsWith("application")) {
         return "/file-earmark-binary.svg"
     }
 
@@ -293,32 +326,33 @@ function getIcon(file) {
 }
 
 /**
- * @param file {File}
+ * @param header {Header}
  * @param progress {number}
  */
-function updateFileVis(file, progress) {
-    let fileEl = document.getElementById(file.webkitRelativePath || file.name)
+function updateFileVis(header, progress) {
+    const opacity = clamp(0, 1 - progress, 1).toFixed(2);
+    if (opacity <= 0) {
+        removeFileVis(header);
+        return;
+    }
+    let fileEl = document.getElementById(btoa(header.name));
     if (!fileEl) {
-        fileEl = createFileVis(file)
+        fileEl = createFileVis(header);
     }
-    fileEl.style.opacity = clamp(0, 1 - progress, 1).toFixed(2);
+    fileEl.style.opacity = opacity;
 }
 
-function removeFileVis(file) {
-    const fileEl = document.getElementById(file.webkitRelativePath || file.name)
+/**
+ * @param header {Header}
+ */
+function removeFileVis(header) {
+    const fileEl = document.getElementById(btoa(header.name));
     if (fileEl) {
-        filesToSend--;
-        fileEl.remove()
+        fileEl.remove();
     }
 }
 
-function cleanupFileVis() {
-    const files = Array.from(document.getElementsByClassName("file"))
-
-    for (const file of files) {
-        file.remove()
-    }
-}
+// utils
 
 /**
  * @param min {number}
@@ -328,4 +362,14 @@ function cleanupFileVis() {
  */
 function clamp(min, value, max) {
     return Math.min(Math.max(value, min), max)
+}
+
+/**
+ * @param timeout {number}
+ * @returns {Promise<unknown>}
+ */
+function delay(timeout) {
+    return new Promise((res) => {
+        setTimeout(res, timeout);
+    });
 }

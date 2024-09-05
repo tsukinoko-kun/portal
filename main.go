@@ -2,6 +2,8 @@ package main
 
 import (
 	"compress/gzip"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/charmbracelet/log"
@@ -13,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -37,61 +38,110 @@ type (
 		Size int `json:"size"`
 		// LastModified is the last modified time of the file.
 		LastModified int64 `json:"lastModified"`
+		// Mime contains the MIME type of the file
+		Mime string `json:"mime"`
 	}
+
+	TransmissionReceiver struct {
+		conn *websocket.Conn
+	}
+
+	TransmissionSignal string
 )
 
-func wsHandler(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Error("failed to upgrade connection", "err", err)
-		return
-	}
-	defer conn.Close()
+const (
+	SignalNone  TransmissionSignal = ""
+	SignalReady TransmissionSignal = "READY"
+	SignalEOF   TransmissionSignal = "EOF"
+	SignalEOT   TransmissionSignal = "EOT"
+)
 
-	// Read header
-	header := Header{}
-	err = conn.ReadJSON(&header)
-	if err != nil {
-		log.Error("failed to read header", "err", err)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to read header"))
-		return
-	}
-	log.Debug("received header", "header", header)
+func (t TransmissionSignal) Into() []byte {
+	return []byte(t)
+}
 
-	p := filepath.Join(wd, header.Name)
+func (t *TransmissionReceiver) Error(message any) {
+	switch v := message.(type) {
+	case string:
+		_ = t.conn.WriteMessage(websocket.CloseProtocolError, websocket.FormatCloseMessage(websocket.CloseNormalClosure, v))
+	case error:
+		_ = t.conn.WriteMessage(websocket.CloseProtocolError, websocket.FormatCloseMessage(websocket.CloseNormalClosure, v.Error()))
+	}
+}
+
+var (
+	EotError = errors.New("end of portal transmission")
+)
+
+func (t *TransmissionReceiver) End() error {
+	return EotError
+}
+
+func (t *TransmissionReceiver) Read() ([]byte, TransmissionSignal, error) {
+	ty, b, err := t.conn.ReadMessage()
+	if err != nil {
+		return nil, SignalNone, err
+	}
+
+	switch ty {
+	case websocket.TextMessage:
+		str := string(b[:])
+		return nil, TransmissionSignal(str), nil
+	case websocket.BinaryMessage:
+		return b, SignalNone, nil
+	}
+
+	return nil, SignalNone, nil
+}
+
+func (t *TransmissionReceiver) Signal(signal TransmissionSignal) error {
+	return t.conn.WriteMessage(websocket.TextMessage, signal.Into())
+}
+
+func (t *TransmissionReceiver) ReadHeader() (header Header, err error) {
+	_, b, err := t.conn.ReadMessage()
+	if err != nil {
+		return header, errors.Join(errors.New("failed to read message expected header"), err)
+	}
+
+	if s := TransmissionSignal(b[:]); s == SignalEOT {
+		log.Debug("received EOT")
+		return header, EotError
+	}
+
+	if err := json.Unmarshal(b, &header); err != nil {
+		log.Error("unmarshalling failed", "err", err)
+		return header, errors.Join(errors.New("failed to unmarshal header"), err)
+	}
+
+	return header, nil
+}
+
+func (t *TransmissionReceiver) CreateFileWriter(h Header) (*os.File, error) {
+	p := filepath.Join(wd, h.Name)
 
 	// check if file is inside wd
 	if relPath, err := filepath.Rel(wd, p); err != nil || relPath == ".." || relPath[:2] == ".." {
 		log.Error("file is outside working directory", "path", p)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("file is outside working directory"))
-		return
+		return nil, fmt.Errorf("file is outside working directory %s", p)
 	}
 
 	// create parent directories
-	if err := os.MkdirAll(filepath.Dir(p), 0777); err != nil {
-		log.Error("failed to create parent directories", "err", err)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to create parent directories"))
-		return
+	parentDir := filepath.Dir(p)
+	if err := os.MkdirAll(parentDir, 0777); err != nil {
+		return nil, errors.Join(fmt.Errorf("failed to create parent directory %s", p), err)
 	}
 
 	// create file
 	f, err := os.Create(p)
 	if err != nil {
-		log.Error("failed to create file", "err", err)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to create file"))
-		return
+		return nil, errors.Join(fmt.Errorf("failed to create file %s", p), err)
 	}
-	defer f.Close()
 	log.Debug("file created", "path", p)
+	return f, nil
+}
 
-	// Send READY signal to start receiving file chunks
-	err = conn.WriteMessage(websocket.TextMessage, []byte("READY"))
-	if err != nil {
-		log.Error("failed to write message", "err", err)
-		return
-	}
-	log.Debug("READY signal sent")
-
+func (t *TransmissionReceiver) Copy(dst io.Writer) error {
 	pipeReader, pipeWriter := io.Pipe()
 	defer pipeReader.Close()
 	log.Debug("pipe created")
@@ -110,66 +160,115 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		defer gzipReader.Close()
 		log.Debug("Gzip reader created")
 
-		if _, err := io.Copy(f, gzipReader); err != nil {
-			log.Error("failed to copy data", "err", err)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to copy data"))
+		if _, err := io.Copy(dst, gzipReader); err != nil {
+			t.Error(errors.Join(errors.New("failed to copy data"), err))
 		} else {
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("EOF"))
+			if err := t.Signal(SignalEOF); err != nil {
+				log.Error("Failed to signal EOF", "err", err)
+			}
 		}
 	}()
 
 	// Read and decompress chunks as they arrive
-	compressetSize := atomic.Int32{}
 	for {
-		_, message, err := conn.ReadMessage()
+		message, s, err := t.Read()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 				log.Debug("WebSocket closed normally.")
+				return nil
 			} else {
-				log.Error("WebSocket read", "err", err)
-				_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to read message"))
-				return
+				return errors.Join(errors.New("failed to read data"), err)
 			}
-			break
 		}
-		log.Debug("received chunk", "size", len(message))
 
-		// check if message is "EOF"
-		if len(message) == 3 && message[0] == 'E' && message[1] == 'O' && message[2] == 'F' {
-			log.Debug("EOF received")
+		if s == SignalEOF {
+			log.Debug("received EOF")
 			break
 		}
 
-		// update compressed size
-		compressetSize.Add(int32(len(message)))
+		if s == SignalEOT {
+			log.Debug("received EOT")
+			return t.End()
+		}
 
 		// Write the compressed chunk to the pipe, which the gzip reader will decompress
 		if _, err = pipeWriter.Write(message); err != nil {
-			log.Error("writing to pipe", "err", err)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to write to pipe"))
-			return
-		} else {
-			log.Debug("chunk written to pipe", "size", len(message))
+			return errors.Join(errors.New("failed to write data to compression pipe"), err)
 		}
 	}
 
-	log.Info("written", "size", compressetSize.Load(), "full size", header.Size)
-
 	if err := pipeWriter.Close(); err != nil {
-		log.Error("failed to close pipe writer", "err", err)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to close pipe writer"))
+		return errors.Join(errors.New("failed to close compression pipe"), err)
+	}
+
+	return nil
+}
+
+func (t *TransmissionReceiver) Process() error {
+	h, err := t.ReadHeader()
+	if err != nil {
+		return errors.Join(errors.New("failed to read header"), err)
+	}
+	if len(h.Name) == 0 {
+		return errors.New("received invalid header")
+	}
+	log.Debug("received", "header", h)
+
+	if err := t.Signal(SignalReady); err != nil {
+		return errors.Join(errors.New("failed to send READY signal"), err)
+	}
+
+	f, err := t.CreateFileWriter(h)
+	if err != nil {
+		return errors.Join(errors.New("failed to create file"), err)
+	}
+	defer func() {
+		if err = f.Close(); err != nil {
+			log.Error("failed to close file", "err", err, "file", f.Name())
+		}
+
+		// set last modified time
+		lastModified := time.UnixMilli(h.LastModified)
+		log.Debug("set last modified time", "file", f.Name(), "last_modified", lastModified)
+		if err := os.Chtimes(f.Name(), lastModified, lastModified); err != nil {
+			log.Error("failed to set last modified time", "err", err)
+		}
+	}()
+
+	copyErr := t.Copy(f)
+
+	if copyErr != nil {
+		log.Error("failed to copy file", "err", copyErr)
 	} else {
-		log.Debug("pipe writer closed")
+		log.Info("successfully copied file", "dst", f.Name())
 	}
 
-	// set last modified time
-	lastModified := time.UnixMilli(header.LastModified)
-	if err := os.Chtimes(p, lastModified, lastModified); err != nil {
-		log.Error("failed to set last modified time", "err", err)
+	return copyErr
+}
+
+func wsHandler(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Error("failed to upgrade connection", "err", err)
+		return
+	}
+	defer conn.Close()
+
+	t := TransmissionReceiver{
+		conn: conn,
 	}
 
-	log.Info("file written", "name", header.Name)
-	wg.Wait()
+	for {
+		if err := t.Process(); err != nil {
+			if errors.Is(err, EotError) {
+				break
+			}
+			log.Error("portal protocol failed", "err", err)
+			t.Error(err)
+			<-time.After(time.Second)
+			break
+		}
+	}
 }
 
 func getPublicIP() (string, error) {
@@ -197,12 +296,21 @@ func getPublicIP() (string, error) {
 	return "", fmt.Errorf("no public IP found")
 }
 
-func main() {
-	port := flag.Int("port", 0, "port to listen on")
-	path := flag.String("path", ".", "path to save files")
-	debug := flag.Bool("debug", false, "enable debug logging")
-	flag.Parse()
+// cli options
+var (
+	port  *int
+	path  *string
+	debug *bool
+)
 
+func parseOptions() {
+	port = flag.Int("port", 0, "port to listen on")
+	path = flag.String("path", ".", "path to save files")
+	debug = flag.Bool("debug", false, "enable debug logging")
+	flag.Parse()
+}
+
+func applyPath() {
 	if *path != "." {
 		if err := os.MkdirAll(*path, 0777); err != nil {
 			log.Fatal("failed to create directory", "path", path, "err", err)
@@ -217,15 +325,30 @@ func main() {
 			log.Info("working directory", "path", wd)
 		}
 	}
+}
 
+func applyLogger() {
 	if *debug {
 		log.SetLevel(log.DebugLevel)
+		log.Debug("debug logging enabled")
+	} else {
+		log.SetLevel(log.InfoLevel)
 	}
+}
 
+func setupHttpHandlers() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.FileServerFS(public.Fs).ServeHTTP(w, r)
 	})
 	http.HandleFunc("/ws", wsHandler)
+}
+
+func main() {
+	parseOptions()
+	applyPath()
+	applyLogger()
+
+	setupHttpHandlers()
 
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
 	if err != nil {
@@ -233,7 +356,7 @@ func main() {
 		return
 	}
 
-	log.Info("server started", "addr", ln.Addr())
+	log.Debug("server started", "addr", ln.Addr())
 
 	if publicIP, err := getPublicIP(); err == nil {
 		fmt.Printf("Portal available at http://%s:%d\n", publicIP, ln.Addr().(*net.TCPAddr).Port)

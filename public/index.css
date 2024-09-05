@@ -313,7 +313,7 @@ main::before {
     animation-duration: 1s;
 }
 
-#file-icons {
+#fileIcons {
     z-index: 1000;
     position: fixed;
     top: 0;
@@ -329,7 +329,7 @@ main::before {
     pointer-events: none;
 }
 
-#file-icons .file {
+#fileIcons .file {
     display: block;
     width: 5vmin;
     aspect-ratio: auto;
