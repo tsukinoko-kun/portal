@@ -322,15 +322,28 @@ main::before {
     width: 100lvw;
     height: 100lvh;
     display: flex;
+    flex-direction: row;
     flex-wrap: wrap;
     justify-content: center;
     align-items: center;
     gap: 1vmin;
     pointer-events: none;
+    color: antiquewhite;
 }
 
 #fileIcons .file {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5vmin;
+}
+
+#fileIcons .file img {
     width: 5vmin;
     aspect-ratio: auto;
+}
+
+#fileIcons .file span {
+    font-size: 0.5rem;
 }

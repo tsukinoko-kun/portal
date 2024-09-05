@@ -74,6 +74,7 @@ class Transmitter {
 
     async streamReaderToWs(reader, header) {
         let totalBytesSent = 0;
+        let i = 0;
         while (true) {
             const {value, done} = await reader.read();
             if (done) {
@@ -83,7 +84,9 @@ class Transmitter {
             totalBytesSent += value.byteLength;
             this.ws.send(value);
             updateFileVis(header, totalBytesSent / header.size);
-            await delay(1);
+            if (i % 4 === 0) {
+                await delay(0);
+            }
         }
     }
 
@@ -279,13 +282,55 @@ function readAllEntries(reader) {
 
 /** @param {Header} header */
 function createFileVis(header) {
-    const fileEl = document.createElement("img");
+    const fileEl = document.createElement("div");
     fileEl.classList.add("file");
-    fileEl.src = getIcon(header);
     fileEl.id = btoa(header.name);
+
+    const iconEl = document.createElement("img");
+    iconEl.src = getIcon(header);
+    fileEl.appendChild(iconEl);
+
+    const statusEl = document.createElement("span");
+    statusEl.innerText = "0 %";
+    fileEl.appendChild(statusEl);
+
     fileIcons.appendChild(fileEl);
     return fileEl;
 }
+
+/**
+ * @param header {Header}
+ * @param progress {number}
+ */
+function updateFileVis(header, progress) {
+    const opacity = clamp(0, 1 - progress, 1).toFixed(2);
+    if (opacity <= 0) {
+        removeFileVis(header);
+        return;
+    }
+    let fileEl = document.getElementById(btoa(header.name));
+    if (!fileEl) {
+        fileEl = createFileVis(header);
+    }
+
+    const iconEl = fileEl.querySelector("img");
+    iconEl.style.opacity = opacity;
+
+    const statusEl = fileEl.querySelector("span");
+    statusEl.innerText = `${Math.round(progress * 100)} %`;
+}
+
+/**
+ * @param header {Header}
+ */
+function removeFileVis(header) {
+    const fileEl = document.getElementById(btoa(header.name));
+    if (fileEl) {
+        fileEl.remove();
+    }
+}
+
+// utils
 
 const fontExtensions = new Set(["ttf", "otf", "woff", "woff2"]);
 const codeExtensions = new Set(["go", "rs", "ts", "js", "tsx", "jsx", "astro", "json", "json5", "jsonc", "yaml", "yml", "toml", "java", "kt", "gradle", "swift", "c", "cc", "cpp", "h", "hpp", "cs", "fs", "vb", "py", "rb", "r", "pl", "php", "php5", "lua", "sh", "ps1", "editorconfig", "gitignore", "md", "tex", "bib"]);
@@ -324,35 +369,6 @@ function getIcon(header) {
 
     return "/file-earmark.svg"
 }
-
-/**
- * @param header {Header}
- * @param progress {number}
- */
-function updateFileVis(header, progress) {
-    const opacity = clamp(0, 1 - progress, 1).toFixed(2);
-    if (opacity <= 0) {
-        removeFileVis(header);
-        return;
-    }
-    let fileEl = document.getElementById(btoa(header.name));
-    if (!fileEl) {
-        fileEl = createFileVis(header);
-    }
-    fileEl.style.opacity = opacity;
-}
-
-/**
- * @param header {Header}
- */
-function removeFileVis(header) {
-    const fileEl = document.getElementById(btoa(header.name));
-    if (fileEl) {
-        fileEl.remove();
-    }
-}
-
-// utils
 
 /**
  * @param min {number}
