@@ -4,15 +4,17 @@ if (!fileIcons) {
     throw new Error("fileIcons element not found");
 }
 
-/**
- * @typedef {{name: string, size: number, lastModified: number, mime: string}} Header
- */
-
 /** @type {HTMLInputElement} */
 const fileInput = document.getElementById("fileInput");
 if (!fileInput) {
     throw new Error("fileInput element not found");
 }
+
+// types
+
+/**
+ * @typedef {{name: string, size: number, lastModified: number, mime: string}} Header
+ */
 
 class ServerError extends Error {
     constructor(message) {
@@ -26,19 +28,6 @@ class ServerError extends Error {
 
     valueOf() {
         return this._serverMessage;
-    }
-}
-
-function explodedPromise() {
-    let resolve, reject;
-    const promise = new Promise((res, rej) => {
-        resolve = res;
-        reject = rej;
-    });
-    return {
-        promise,
-        resolve,
-        reject,
     }
 }
 
@@ -388,4 +377,17 @@ function delay(timeout) {
     return new Promise((res) => {
         setTimeout(res, timeout);
     });
+}
+
+function explodedPromise() {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+    return {
+        promise,
+        resolve,
+        reject,
+    }
 }
