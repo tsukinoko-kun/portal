@@ -66,52 +66,52 @@ main::before {
     pointer-events: none;
 }
 
-.ring::before,
-.ring::after,
 .ring {
     position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    top: calc(50dvh - 25vmin);
+    left: calc(50dvw - 25vmin);
     width: 50vmin;
     height: 50vmin;
     border: 5vmin solid rgba(var(--magic), 1);
     border-radius: 50%;
 }
 
-.ring {
+.ring-main {
     filter: drop-shadow(0 0 5vmin rgb(var(--magic))) drop-shadow(0 0 1vmin rgb(var(--magic)));
-    background: radial-gradient(transparent, rgba(var(--magic), 0.5));
+    background: radial-gradient(closest-side, transparent, rgb(var(--magic)));
+    backdrop-filter: blur(2px);
 }
 
-.drag-over .ring {
+.drag-over .ring-main {
     filter: drop-shadow(0 0 5vmin rgb(var(--magic))) drop-shadow(0 0 5vmin rgb(var(--magic)));
+    background: radial-gradient(closest-side, rgba(var(--magic), 0.1), rgb(var(--magic)));
 }
 
-.sending .ring {
+.sending .ring-main {
     filter: drop-shadow(0 0 5vmin rgb(var(--magic))) drop-shadow(0 0 7.5vmin rgb(var(--magic)));
+    background: radial-gradient(closest-side, rgba(255, 200, 230, 0.25), rgba(var(--magic), 1));
 }
 
 @keyframes wiggle-ring-a {
     from {
-        transform: translate(-49%, -50%);
+        transform: translateX(-0.5vmin);
     }
     to {
-        transform: translate(-51%, -50%);
+        transform: translateX(0.5vmin);
     }
 }
 
 @keyframes wiggle-ring-b {
     from {
-        transform: translate(-50%, -49%);
+        transform: translateY(-0.5vmin);
     }
     to {
-        transform: translate(-50%, -51%);
+        transform: translateY(0.5vmin);
     }
 }
 
-.ring::after,
-.ring::before {
+.ring-a,
+.ring-b {
     content: "";
     display: block;
     animation-iteration-count: infinite;
@@ -119,24 +119,16 @@ main::before {
     animation-timing-function: ease-in-out;
 }
 
-.drag-over .ring::before,
-.sending .ring::before {
+.drag-over .ring-a,
+.sending .ring-a {
     animation-name: wiggle-ring-a;
     animation-duration: 200ms;
 }
 
-.drag-over .ring::after,
-.sending .ring::after {
+.drag-over .ring-b,
+.sending .ring-b {
     animation-name: wiggle-ring-b;
     animation-duration: 333ms;
-}
-
-.drag-over .ring {
-    background: radial-gradient(rgba(var(--magic), 0.1), rgba(var(--magic), 1));
-}
-
-.sending .ring {
-    background: radial-gradient(closest-side, rgba(255, 200, 230, 0.25), rgba(var(--magic), 1));
 }
 
 .particle {
@@ -219,7 +211,7 @@ main::before {
         opacity: 1;
     }
     100% {
-        transform: translate(-10vmax, -25vmax) scale(1);
+        transform: translate(-20vmax, -45vmax) scale(1);
         opacity: 0;
     }
 }
@@ -233,7 +225,7 @@ main::before {
         opacity: 1;
     }
     100% {
-        transform: translate(25vmax, 10vmax) scale(1);
+        transform: translate(45vmax, 20vmax) scale(1);
         opacity: 0;
     }
 }
@@ -247,7 +239,7 @@ main::before {
         opacity: 1;
     }
     100% {
-        transform: translate(-25vmax, -10vmax) scale(1);
+        transform: translate(-45vmax, -20vmax) scale(1);
         opacity: 0;
     }
 }
@@ -261,7 +253,7 @@ main::before {
         opacity: 1;
     }
     100% {
-        transform: translate(10vmax, 25vmax) scale(1);
+        transform: translate(20vmax, 45vmax) scale(1);
         opacity: 0;
     }
 }
@@ -271,39 +263,39 @@ main::before {
     animation-delay: 0s;
 }
 
-.particle-b {
+.particle-g {
     animation-name: particle-b;
-    animation-delay: 0.2s;
-}
-
-.particle-c {
-    animation-name: particle-c;
     animation-delay: 0.5s;
 }
 
-.particle-d {
-    animation-name: particle-d;
-    animation-delay: 0.75s;
+.particle-b {
+    animation-name: particle-c;
+    animation-delay: 1s;
 }
 
-.particle-e {
+.particle-c {
+    animation-name: particle-d;
+    animation-delay: 1.5s;
+}
+
+.particle-d {
     animation-name: particle-e;
-    animation-delay: 1s;
+    animation-delay: 2s;
 }
 
 .particle-f {
     animation-name: particle-f;
-    animation-delay: 1.25s;
+    animation-delay: 2.5s;
 }
 
-.particle-g {
+.particle-e {
     animation-name: particle-g;
-    animation-delay: 1.5s;
+    animation-delay: 3s;
 }
 
 .particle-h {
     animation-name: particle-h;
-    animation-delay: 1.75s;
+    animation-delay: 3.5s;
 }
 
 .particle {

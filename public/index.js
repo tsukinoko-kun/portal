@@ -1,13 +1,16 @@
 const fileIcons = document.getElementById("file-icons");
 let filesToSend = 0;
 
+let intervalsWithoutSending = 0;
 window.setInterval(() => {
     if (filesToSend === 0) {
-        document.body.classList.remove("sending");
+        if (intervalsWithoutSending++ > 2) {
+            document.body.classList.remove("sending");
+        }
     } else {
         document.body.classList.add("sending");
     }
-}, 1000)
+}, 500)
 
 if (!fileIcons) {
     throw new Error("file-icons not found");
