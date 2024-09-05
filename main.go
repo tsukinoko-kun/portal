@@ -1,27 +1,25 @@
 package main
 
 import (
+	"compress/gzip"
 	"flag"
 	"fmt"
 	"github.com/charmbracelet/log"
 	"github.com/gorilla/websocket"
 	"github.com/tsukinoko-kun/portal/public"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
-const (
-	chunkSize = 1024 * 1024 // 1MB
-)
-
 var (
-	upgrader = websocket.Upgrader{
-		ReadBufferSize: chunkSize,
-	}
-	wd string
+	upgrader = websocket.Upgrader{}
+	wd       string
 )
 
 func init() {
@@ -55,21 +53,24 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	err = conn.ReadJSON(&header)
 	if err != nil {
 		log.Error("failed to read header", "err", err)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to read header"))
 		return
 	}
-	log.Info("received header", "header", header)
+	log.Debug("received header", "header", header)
 
 	p := filepath.Join(wd, header.Name)
 
 	// check if file is inside wd
 	if relPath, err := filepath.Rel(wd, p); err != nil || relPath == ".." || relPath[:2] == ".." {
 		log.Error("file is outside working directory", "path", p)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("file is outside working directory"))
 		return
 	}
 
 	// create parent directories
 	if err := os.MkdirAll(filepath.Dir(p), 0777); err != nil {
 		log.Error("failed to create parent directories", "err", err)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to create parent directories"))
 		return
 	}
 
@@ -77,9 +78,11 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	f, err := os.Create(p)
 	if err != nil {
 		log.Error("failed to create file", "err", err)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to create file"))
 		return
 	}
 	defer f.Close()
+	log.Debug("file created", "path", p)
 
 	// Send READY signal to start receiving file chunks
 	err = conn.WriteMessage(websocket.TextMessage, []byte("READY"))
@@ -87,36 +90,76 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		log.Error("failed to write message", "err", err)
 		return
 	}
+	log.Debug("READY signal sent")
 
-	// Read file chunk by chunk because the file might be too large to fit in memory
-	for {
-		messageType, p, err := conn.ReadMessage()
+	pipeReader, pipeWriter := io.Pipe()
+	defer pipeReader.Close()
+	log.Debug("pipe created")
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		log.Debug("creating Gzip reader")
+		gzipReader, err := gzip.NewReader(pipeReader)
 		if err != nil {
-			if _, ok := err.(*websocket.CloseError); ok {
-				log.Warn("connection closed by client", "err", err)
-				return
-			}
-			log.Error("failed to read message", "err", err)
+			log.Error("Failed to create Gzip reader", "err", err)
 			return
 		}
+		defer gzipReader.Close()
+		log.Debug("Gzip reader created")
 
-		if messageType == websocket.TextMessage && string(p) == "EOF" {
+		if _, err := io.Copy(f, gzipReader); err != nil {
+			log.Error("failed to copy data", "err", err)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to copy data"))
+		} else {
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("EOF"))
+		}
+	}()
+
+	// Read and decompress chunks as they arrive
+	compressetSize := atomic.Int32{}
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+				log.Debug("WebSocket closed normally.")
+			} else {
+				log.Error("WebSocket read", "err", err)
+				_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to read message"))
+				return
+			}
+			break
+		}
+		log.Debug("received chunk", "size", len(message))
+
+		// check if message is "EOF"
+		if len(message) == 3 && message[0] == 'E' && message[1] == 'O' && message[2] == 'F' {
+			log.Debug("EOF received")
 			break
 		}
 
-		if messageType == websocket.BinaryMessage {
-			_, err = f.Write(p)
-			if err != nil {
-				log.Error("failed to write to file", "err", err)
-				return
-			}
-		}
+		// update compressed size
+		compressetSize.Add(int32(len(message)))
 
-		err = conn.WriteMessage(websocket.TextMessage, []byte("READY"))
-		if err != nil {
-			log.Error("failed to write message", "err", err)
+		// Write the compressed chunk to the pipe, which the gzip reader will decompress
+		if _, err = pipeWriter.Write(message); err != nil {
+			log.Error("writing to pipe", "err", err)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to write to pipe"))
 			return
+		} else {
+			log.Debug("chunk written to pipe", "size", len(message))
 		}
+	}
+
+	log.Info("written", "size", compressetSize.Load(), "full size", header.Size)
+
+	if err := pipeWriter.Close(); err != nil {
+		log.Error("failed to close pipe writer", "err", err)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("failed to close pipe writer"))
+	} else {
+		log.Debug("pipe writer closed")
 	}
 
 	// set last modified time
@@ -125,36 +168,39 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		log.Error("failed to set last modified time", "err", err)
 	}
 
-	// send EOF to client to signal that the file has been received
-	err = conn.WriteMessage(websocket.TextMessage, []byte("EOF"))
-	if err != nil {
-		log.Error("failed to write message", "err", err)
-		return
-	}
-
 	log.Info("file written", "name", header.Name)
+	wg.Wait()
 }
 
 func getPublicIP() (string, error) {
-	var publicIP string
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return "", err
 	}
+
 	for _, addr := range addrs {
 		if ip, ok := addr.(*net.IPNet); ok && !ip.IP.IsLoopback() {
-			if ip.IP.To4() != nil { // IPv4
-				publicIP = ip.IP.String()
-				break
+			if ip.IP.To4() != nil {
+				return ip.IP.String(), nil
 			}
 		}
 	}
-	return publicIP, nil
+
+	for _, addr := range addrs {
+		if ip, ok := addr.(*net.IPNet); ok && !ip.IP.IsLoopback() {
+			if ip.IP.To16() != nil {
+				return ip.IP.String(), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no public IP found")
 }
 
 func main() {
 	port := flag.Int("port", 0, "port to listen on")
 	path := flag.String("path", ".", "path to save files")
+	debug := flag.Bool("debug", false, "enable debug logging")
 	flag.Parse()
 
 	if *path != "." {
@@ -170,6 +216,10 @@ func main() {
 		if wd, err = os.Getwd(); err == nil {
 			log.Info("working directory", "path", wd)
 		}
+	}
+
+	if *debug {
+		log.SetLevel(log.DebugLevel)
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

@@ -2,7 +2,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-args_bin = ["--port", "4321", "--path", "~/Downloads/portal"]
+args_bin = ["--port", "4321", "--path", "~/Downloads/portal", "--debug"]
 bin = "./tmp/main"
 cmd = "go build -o ./tmp/main ."
 delay = 1000

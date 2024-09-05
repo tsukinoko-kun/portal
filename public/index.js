@@ -21,6 +21,7 @@ function getWs() {
         url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
         url.pathname = "/ws";
         const ws = new WebSocket(url.href);
+        ws.binaryType = "arraybuffer";
 
         ws.addEventListener("open", function () {
             resolve(ws);
@@ -57,20 +58,23 @@ const sendFile = (file, overwritePath = file.webkitRelativePath ?? file.name) =>
     console.debug("sendFile", {file, overwritePath});
     filesToSend++;
     const ws = await getWs();
-    const fileReader = new FileReader();
-    let offset = 0;
+    const compressionStream = new CompressionStream("gzip");
+    const fileStream = file.stream();
+    const compressedStream = fileStream.pipeThrough(compressionStream);
+    const reader = compressedStream.getReader();
 
     ws.onmessage = function (event) {
         switch (event.data) {
             case "READY":
-                if (offset === 0) {
-                    resolve();
-                }
-                updateFileVis(file, offset / file.size);
-                readChunk(file);
+                resolve();
+                void streamReaderToWs(file, reader, ws).finally(() => {
+                    removeFileVis(file);
+                    ws.send("EOF");
+                });
                 break;
             case "EOF":
                 removeFileVis(file);
+                ws.close();
                 break;
             default:
                 console.error("unexpected message from server:", event.data);
@@ -80,24 +84,31 @@ const sendFile = (file, overwritePath = file.webkitRelativePath ?? file.name) =>
         }
     };
 
-    function readChunk(file) {
-        if (offset >= file.size) {
-            ws.send("EOF");
-            return;
-        }
-        const slice = file.slice(offset, offset + chunkSize);
-        fileReader.readAsArrayBuffer(slice);
-    }
-
-    fileReader.onload = function (e) {
-        ws.send(e.target.result);
-        offset += e.target.result.byteLength;
-    };
-
     const header = composeHeader(file, overwritePath);
     ws.send(header);
     createFileVis(file)
 });
+
+/**
+ * @param file {File}
+ * @param reader {ReadableStreamDefaultReader<any>}
+ * @param ws {WebSocket}
+ */
+async function streamReaderToWs(file, reader, ws) {
+    let totalBytesSent = 0;
+    while (true) {
+        const {value, done} = await reader.read();
+        if (done) {
+            break;
+        }
+
+        totalBytesSent += value.byteLength;
+        updateFileVis(file, totalBytesSent / file.size);
+
+        // Send the chunk over WebSocket
+        ws.send(value);
+    }
+}
 
 /**
  * @param file {File}

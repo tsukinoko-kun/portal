@@ -1,5 +1,7 @@
 # portal
 
+Demo on YouTube: [youtu.be/B5lyzax5Yas](https://youtu.be/B5lyzax5Yas)
+
 ## Install
 
 ### Homebrew
