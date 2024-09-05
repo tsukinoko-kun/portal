@@ -1,4 +1,3 @@
-const chunkSize = 1024 * 1024; // 1MB chunks
 const fileIcons = document.getElementById("file-icons");
 let filesToSend = 0;
 
@@ -14,9 +13,23 @@ if (!fileIcons) {
     throw new Error("file-icons not found");
 }
 
+let wsCount = 0;
+const maxWsCount = 4;
+
 /** @returns {Promise<WebSocket>} */
-function getWs() {
-    return new Promise((resolve, reject) => {
+async function getWs() {
+    if (wsCount > maxWsCount) {
+        await new Promise((resolve) => {
+            const interval = window.setInterval(() => {
+                if (wsCount === 0) {
+                    window.clearInterval(interval);
+                    resolve();
+                }
+            }, 100);
+        });
+    }
+
+    return await new Promise((resolve, reject) => {
         const url = new URL(window.location.href);
         url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
         url.pathname = "/ws";
@@ -30,6 +43,10 @@ function getWs() {
         ws.addEventListener("error", function (error) {
             console.error("WS Error:", error);
             reject(error);
+        });
+
+        ws.addEventListener("close", function () {
+            wsCount--;
         });
     });
 }
