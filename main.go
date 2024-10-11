@@ -6,9 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/charmbracelet/log"
-	"github.com/gorilla/websocket"
-	"github.com/tsukinoko-kun/portal/public"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +13,10 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/charmbracelet/log"
+	"github.com/gorilla/websocket"
+	"github.com/tsukinoko-kun/portal/public"
 )
 
 var (
@@ -360,6 +361,9 @@ func main() {
 
 	if publicIP, err := getPublicIP(); err == nil {
 		fmt.Printf("Portal available at http://%s:%d\n", publicIP, ln.Addr().(*net.TCPAddr).Port)
+	}
+	if hostname, err := os.Hostname(); err == nil {
+		fmt.Printf("Portal available at http://%s:%d\n", hostname, ln.Addr().(*net.TCPAddr).Port)
 	}
 
 	if err := http.Serve(ln, nil); err != nil {
