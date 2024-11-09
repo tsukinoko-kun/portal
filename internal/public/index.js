@@ -58,10 +58,10 @@ class Transmitter {
         url.hash = "";
         url.search = "";
         url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-        this.ws = new WebSocket(url);
+        this.ws = new BlockingWebSocket(url);
         const expProm = explodedPromise();
         this.available = expProm.promise;
-        this.ws.addEventListener("open", expProm.resolve, {once: true})
+        this.ws.addEventListener("open", expProm.resolve, { once: true })
         this.sentCount = 0;
     }
 
@@ -87,7 +87,7 @@ class Transmitter {
         let lastTime = performance.now();
         let lastData = 0;
         while (true) {
-            const {value, done} = await reader.read();
+            const { value, done } = await reader.read();
             if (done) {
                 break;
             }
@@ -123,7 +123,7 @@ class Transmitter {
                 } else {
                     reject(new ServerError(ev.data));
                 }
-            }, {once: true});
+            }, { once: true });
         });
     }
 
@@ -145,18 +145,17 @@ class Transmitter {
 
         console.debug("transmit", file, header);
         createFileVis(header);
-        const compressionStream = new CompressionStream("gzip");
         const fileStream = file.stream();
-        const compressedStream = fileStream.pipeThrough(compressionStream);
-        const reader = compressedStream.getReader();
+        const reader = fileStream.getReader();
 
         const serverReady = this.serverMessage((data) => data === "READY");
         this.ws.send(JSON.stringify(header));
         await serverReady;
 
+
         await this.streamReaderToWs(reader, header);
         console.debug("EOF", header.name)
-        await this.ws.send("EOF");
+        this.ws.send("EOF");
         removeFileVis(header);
         this.setBusy(false);
     }
@@ -164,6 +163,42 @@ class Transmitter {
     end() {
         console.debug("sending EOT");
         this.ws.send("EOT");
+    }
+}
+
+class BlockingWebSocket {
+    constructor(url, bufferedThreshold = 1024 * 1024 * 2) { // Default threshold: 2MiB
+        this.ws = new WebSocket(url);
+        this.bufferedThreshold = bufferedThreshold;
+    }
+
+    async send(data) {
+        // Wait until bufferedAmount is below the threshold
+        while (this.ws.bufferedAmount > this.bufferedThreshold) {
+            await this.waitForBuffer();
+        }
+
+        // Now it's safe to send
+        this.ws.send(data);
+    }
+
+    waitForBuffer() {
+        return new Promise(resolve => {
+            // Use setTimeout to poll bufferedAmount after a short delay
+            const checkBuffer = () => {
+                if (this.ws.bufferedAmount <= this.bufferedThreshold) {
+                    resolve();
+                } else {
+                    // Keep waiting if bufferedAmount is still high
+                    setTimeout(checkBuffer, 50);
+                }
+            };
+            checkBuffer();
+        });
+    }
+
+    addEventListener(event, listener, options) {
+        this.ws.addEventListener(event, listener, options);
     }
 }
 
@@ -186,9 +221,9 @@ fileInput.addEventListener("change", async function () {
 
 // drag and drop
 
-document.body.addEventListener("dragenter", handleDragEnter, {passive: true});
+document.body.addEventListener("dragenter", handleDragEnter, { passive: true });
 document.body.addEventListener("dragover", handleDragOver);
-document.body.addEventListener("dragleave", handleDragLeave, {passive: true});
+document.body.addEventListener("dragleave", handleDragLeave, { passive: true });
 document.body.addEventListener("drop", handleDrop);
 
 function handleDragEnter() {
@@ -271,7 +306,7 @@ async function* readDirectoryRecursively(directoryEntry) {
         if (entry.isFile) {
             try {
                 const file = await getFileFromEntry(entry);
-                yield {file, name: entry.fullPath};
+                yield { file, name: entry.fullPath };
             } catch (err) {
                 console.error("Failed to process file within directory:", entry, err);
             }

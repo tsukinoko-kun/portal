@@ -1,9 +1,19 @@
 package main
 
-import "github.com/tsukinoko-kun/portal/internal/net"
+import (
+	"log"
+	"os"
+
+	"github.com/tsukinoko-kun/portal/internal/config"
+	"github.com/tsukinoko-kun/portal/internal/net"
+)
 
 func main() {
-	if err := net.Listen(); err != nil {
-		panic(err)
+	if err := os.Chdir(config.Path); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := net.StartServer(); err != nil {
+		log.Fatal(err)
 	}
 }
