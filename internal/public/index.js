@@ -37,7 +37,7 @@ const bandwidthCalculator = {
 /** handles errors sent from the Go server */
 class ServerError extends Error {
     constructor(message) {
-        super("unexpected message from server");
+        super("unexpected message from server: " + message);
         this._serverMessage = message;
     }
 

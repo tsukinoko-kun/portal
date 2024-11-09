@@ -47,91 +47,89 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Step 1: Receive and decode the file header
-	var header Header
-	_, message, err := conn.ReadMessage()
-	if err != nil {
-		log.Error("failed to read message", "err", err)
-		return
-	}
-
-	if err := json.Unmarshal(message, &header); err != nil {
-		log.Error("failed to unmarshal header", "err", err)
-		return
-	}
-
-	// Normalize and verify the file path
-	filePath, err := normalizePath(header.Name)
-	if err != nil {
-		log.Error("failed to normalize file path", "err", err)
-		conn.WriteMessage(websocket.TextMessage, []byte("Invalid file path"))
-		return
-	}
-
-	// Ensure the file path is within the server's working directory
-	if !isInWorkingDir(filePath) {
-		log.Error("file path outside working directory")
-		conn.WriteMessage(websocket.TextMessage, []byte("File path outside working directory"))
-		return
-	}
-
-	// Create the target directory if needed
-	if err := os.MkdirAll(filepath.Dir(filePath), os.ModePerm); err != nil {
-		log.Error("failed to create directory", "err", err)
-		conn.WriteMessage(websocket.TextMessage, []byte("Directory creation error"))
-		return
-	}
-
-	// Open the target file for writing
-	file, err := os.Create(filePath)
-	if err != nil {
-		log.Error("failed to create file", "err", err)
-		conn.WriteMessage(websocket.TextMessage, []byte("File creation error"))
-		return
-	}
-	defer file.Close()
-
-	// Send "READY" message to the client
-	conn.WriteMessage(websocket.TextMessage, []byte("READY"))
-
-	// Step 2: Receive and write file chunks
 	for {
+		// Step 1: Receive and decode the file header
+		var header Header
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			log.Error("failed to read message", "err", err)
 			return
 		}
 
-		// Check for EOF
-		if string(message) == "EOF" {
-			log.Debug("end of file")
+		// Check if the message is "EOT" (end of transmission)
+		if string(message) == "EOT" {
+			log.Debug("end of transmission")
 			break
 		}
 
-		// Write the chunk to the file
-		if _, err := file.Write(message); err != nil {
-			log.Error("failed to write file chunk", "err", err)
+		if err := json.Unmarshal(message, &header); err != nil {
+			log.Error("failed to unmarshal header", "err", err)
 			return
 		}
-	}
 
-	// Optionally, set the file's last modified time
-	modTime := time.Unix(header.LastModified, 0)
-	if err := os.Chtimes(filePath, modTime, modTime); err != nil {
-		log.Error("failed to set last modified time", "err", err)
-	}
+		// Normalize and verify the file path
+		filePath := normalizePath(header.Name)
 
-	log.Info("file copy successful")
+		// Ensure the file path is within the server's working directory
+		if !isInWorkingDir(filePath) {
+			log.Error("file path outside working directory")
+			conn.WriteMessage(websocket.TextMessage, []byte("File path outside working directory"))
+			return
+		}
+
+		// Create the target directory if needed
+		if err := os.MkdirAll(filepath.Dir(filePath), os.ModePerm); err != nil {
+			log.Error("failed to create directory", "err", err)
+			conn.WriteMessage(websocket.TextMessage, []byte("Directory creation error"))
+			return
+		}
+
+		// Open the target file for writing
+		file, err := os.Create(filePath)
+		if err != nil {
+			log.Error("failed to create file", "err", err)
+			conn.WriteMessage(websocket.TextMessage, []byte("File creation error"))
+			return
+		}
+		defer file.Close()
+
+		// Send "READY" message to the client
+		conn.WriteMessage(websocket.TextMessage, []byte("READY"))
+
+		// Step 2: Receive and write file chunks
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				log.Error("failed to read message", "err", err)
+				return
+			}
+
+			// Check for EOF
+			if string(message) == "EOF" {
+				log.Debug("end of file")
+				break
+			}
+
+			// Write the chunk to the file
+			if _, err := file.Write(message); err != nil {
+				log.Error("failed to write file chunk", "err", err)
+				return
+			}
+		}
+
+		// Optionally, set the file's last modified time
+		modTime := time.Unix(header.LastModified, 0)
+		if err := os.Chtimes(filePath, modTime, modTime); err != nil {
+			log.Error("failed to set last modified time", "err", err)
+		}
+
+		log.Info("file copy successful", "file", filePath)
+	}
 }
 
 // normalizePath cleans and returns the absolute path of the file.
-func normalizePath(name string) (string, error) {
-	// Clean and make the path absolute
-	absPath, err := filepath.Abs(filepath.Clean(name))
-	if err != nil {
-		return "", err
-	}
-	return absPath, nil
+func normalizePath(name string) string {
+	return filepath.Join(config.Path, filepath.Clean(name))
 }
 
 // isInWorkingDir checks if a path is within the server's current working directory.
@@ -188,7 +186,7 @@ func StartServer() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
-			log.Fatalf("Server forced to shutdown: %v", err)
+			log.Warn("Server forced to shutdown", "err", err)
 		}
 	}()
 
